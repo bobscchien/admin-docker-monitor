@@ -1,0 +1,135 @@
+version: "3.7"
+
+services:
+  cadvisor:
+    container_name: cadvisor
+    hostname: cadvisor
+    image: google/cadvisor
+    privileged: true
+    networks:
+      custom-net:
+        ipv4_address: ${CADVISOR_IP}
+    ports:
+      - 28080:8080
+    volumes:
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /var/run:/var/run:ro
+      - /dev/disk:/dev/disk:ro
+      - ${DIR_DOCKER}:/var/lib/docker:ro
+    deploy:
+      resources:
+        limits:
+          cpus: ${CADVISOR_CPUS}
+          memory: ${CADVISOR_MEMORY}
+    restart: unless-stopped
+  
+  node-exporter:
+    container_name: node-exporter
+    hostname: node-exporter
+    image: prom/node-exporter
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      custom-net:
+        ipv4_address: ${EXPORTER_IP}
+    ports:
+      - 9100:9100
+    deploy:
+      resources:
+        limits:
+          cpus: ${EXPORTER_CPUS}
+          memory: ${EXPORTER_MEMORY}
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.processes'
+#      - '--collector.systemd'
+
+  prometheus:
+    container_name: prometheus
+    hostname: prometheus
+    image: prom/prometheus
+    user: "${USER_UID}:${USER_GID}"
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yaml
+      - ./config/alert_rules.yaml:/etc/prometheus/alert_rules.yaml
+      - ${DIR_LOCAL_PROMETH}:/prometheus:rw
+    networks:
+      custom-net:
+        ipv4_address: ${PROMETH_IP}
+    ports:
+      - 9090:9090
+    deploy:
+      resources:
+        limits:
+          cpus: ${PROMETH_CPUS}
+          memory: ${PROMETH_MEMORY}
+    restart: unless-stopped
+    depends_on:
+      - cadvisor
+      - node-exporter
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+
+  grafana:
+    container_name: grafana
+    hostname: grafana
+    image: grafana/grafana
+    user: "${USER_UID}:${USER_GID}"
+    env_file:
+      - .env
+      - ./config/credential.ini
+    volumes:
+      - ${DIR_LOCAL_GRAFANA}:/var/lib/grafana:rw
+    networks:
+      custom-net:
+        ipv4_address: ${GRAFANA_IP}
+    ports:
+      - 23000:3000
+    deploy:
+      resources:
+        limits:
+          cpus: ${GRAFANA_CPUS}
+          memory: ${GRAFANA_MEMORY}
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  alert-manager:
+    container_name: alert-manager
+    hostname: alert-manager
+    image: prom/alertmanager
+    user: "${USER_UID}:${USER_GID}"
+    volumes:
+      - ./config/alertmanager.yaml:/etc/alertmanager/alertmanager.yaml
+      - ${DIR_LOCAL_ALERTMANAGER}:/alertmanager:rw
+    networks:
+      custom-net:
+        ipv4_address: ${ALERTMANAGER_IP}
+    ports:
+      - 9093:9093
+    deploy:
+      resources:
+        limits:
+          cpus: ${ALERTMANAGER_CPUS}
+          memory: ${ALERTMANAGER_MEMORY}
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yaml'
+      - '--storage.path=/alertmanager'
+
+### Network & Volume
+
+networks:
+  custom-net:
+    external:
+      name: ${CUSTOM_NET}
